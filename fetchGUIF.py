@@ -9,7 +9,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from datetime import datetime
 
 # Assuming the model expects images of this size
-IMAGE_SIZE = (25, 1)
+
 model = None  # Initially, no model is loaded
 
 def load_model():
@@ -31,48 +31,49 @@ def open_data_and_predict():
     if not file_path:
         return
 
-    df = pd.read_csv(file_path, parse_dates=True)
-    df.columns=['# Date','Receipt_Count']
-    df['Date']=pd.to_datetime(df['# Date'], format='%Y-%m-%d')
-    df1=df.drop(['# Date'], axis=1)
-    
+    reciept_dataframe = pd.read_csv(file_path, usecols=[1], engine='python') 
+    # Convert to Numpy Array and Normalize
+    reciept_array = reciept_dataframe.values.astype('float32')
+    scaler=MinMaxScaler(feature_range=(0, 1))
+    normalized_reciept_data= scaler.fit_transform(reciept_array)
+    # divide into training and testing sets
+    training_rate= int(len(normalized_reciept_data)*0.80)
+    train_partition, test_partition = normalized_reciept_data[0:training_rate,:], normalized_reciept_data[training_rate:len(normalized_reciept_data),:]
+    def organize_data(sequence,history_length=1):
+        input_data, target_data = [], []
+        for i in range (len(sequence)-history_length-1):
+            fragment=sequence[i:(i+history_length),0]
+            input_data.append(fragment)
+            target_data.append(sequence[i+history_length,0])
+        return np.array(input_data),np.array(target_data)
+    history_length=1
+    x_train,y_train=organize_data(train_partition,history_length)
+    x_test,y_test=organize_data(test_partition,history_length)
 
-    def date_to_day_of_year(date_string, date_format='%m/%d'):
+    x_train=np.reshape(x_train,(x_train.shape[0],1,x_train.shape[1]))
+    x_test=np.reshape(x_test,(x_test.shape[0],1,x_test.shape[1]))
 
-        day_of_year = date_string.timetuple().tm_yday
-    
-        return day_of_year
-    df1['dayOfYear'] = df1['Date'].apply(date_to_day_of_year, date_format='%m/%d/%Y')
-  
-    training_rate=int(0.8 * len( df1['dayOfYear'])) 
-    x_train= df1['dayOfYear'][:training_rate]
-    y_train=df1['Receipt_Count'][:training_rate]
-    x_test= df1['dayOfYear'][training_rate:] 
-    y_test=df1['Receipt_Count'][training_rate:]
-    
- 
-    scaler = MinMaxScaler(feature_range=(-1, 1)) #0,1
-    y_train = scaler.fit_transform(np.reshape(y_train,((-1, 1))))
-    x_test=np.expand_dims(x_test,axis=-1)
-    x_test=np.expand_dims(x_test,axis=-1)
+    train_forecast = model.predict(x_train)
+    test_forecast = model.predict(x_test)
 
-    y_test_normalized = scaler.fit_transform(np.reshape(y_test,((-1, 1))))
+    train_forecast = scaler.inverse_transform(train_forecast)
+    train_target = scaler.inverse_transform([y_train])
+    test_forecast = scaler.inverse_transform(test_forecast)
+    test_target = scaler.inverse_transform([y_test])
 
-    predictions_normalized = model.predict(x_test)
-    predictions = scaler.inverse_transform(predictions_normalized)
-
-    print(predictions)
+    print(test_forecast)
     # Clear the previous figure
     for widget in image_frame.winfo_children():
         widget.destroy()
 
     # Create a figure to plot
-    fig = Figure(figsize=(6, 4), dpi=100)
+    fig = Figure(figsize=(8, 4), dpi=100)
     plot = fig.add_subplot(1, 1, 1)
 
     # Plot the predictions and ground truth
-    plot.plot(np.squeeze(x_test), np.array(y_test), label='Ground Truth', color='blue')#.argsort() #np.arange(len(y_test))
-    plot.plot(np.squeeze(x_test), np.array(predictions).flatten(), label='Predictions', color='red')#.argsort()
+    plot.plot(scaler.inverse_transform(normalized_reciept_data), label='Ground Truth', color='blue')#.argsort() #np.arange(len(y_test))
+    plot.plot([item for item in train_forecast], label='training forecast', color='green')#.argsort()
+    plot.plot([item+len(train_forecast) for item in range(len(test_forecast))], test_forecast ,label='test_forecast', color='red')#.argsort()
     plot.set_title('Predictions vs Ground Truth')
     plot.legend()
 
